@@ -297,12 +297,12 @@ const wchar_t* pps[] = {
     LR"(C:\Program Files\EFA\TPPrintDM.dll)",
     nullptr };
 
-    std::string getCmdOption(int argc, char* argv[], const std::string& option, const std::string& _default)
+    std::wstring getCmdOption(int argc, wchar_t* argv[], const std::wstring& option, const std::wstring& _default)
     {
-        std::string cmd;
+        std::wstring cmd;
         for (int i = 0; i < argc; ++i)
         {
-            std::string arg = argv[i];
+            std::wstring arg = argv[i];
             if (0 == arg.find(option))
             {
                 std::size_t found = arg.find_first_of(option);
@@ -313,15 +313,16 @@ const wchar_t* pps[] = {
         return _default;
     }
 
-    int main(int argc, char* argv[])
+    int wmain(int argc, wchar_t* argv[])
 {
-    bool loopDir = getCmdOption(argc, argv, "--loopdir", "no") != "no";;
-    std::string folder = getCmdOption(argc, argv, "--dir=", ".");
+    bool loopDir = getCmdOption(argc, argv, L"--loopdir", L"no") != L"no";
+    std::wstring folder = getCmdOption(argc, argv, L"--dir=", L".");
+    std::wstring filter = getCmdOption(argc, argv, L"--filter=", L".*\\.dll");
     if (loopDir)
     {
         using directory_iterator = filesystem::directory_iterator;
         for (const auto& dirEntry : directory_iterator(folder))
-            if (regex_match(dirEntry.path().c_str(), wregex(L".*\\.dll")))
+            if (regex_match(dirEntry.path().c_str(), wregex(filter, regex_constants::icase)))
                 CheckDLL(dirEntry.path().c_str());
             else
                 wcout << L"skipping: " << dirEntry.path().c_str() << endl;
@@ -329,7 +330,7 @@ const wchar_t* pps[] = {
     else
     {
         auto ppsListIndex = pps;
-        bool skipfirst = getCmdOption(argc, argv, "--skipfirst", "no") != "no";;
+        bool skipfirst = getCmdOption(argc, argv, L"--skipfirst", L"no") != L"no";
         while (*ppsListIndex != nullptr)
         {
             if (skipfirst)
@@ -350,11 +351,33 @@ const wchar_t* pps[] = {
 
 void CheckDLL(const wchar_t* i)
 {
-    std::wcout << L"checking: " << i << endl;
+    static int loadedDLL = 0;
+    static int loadedDLLTryies = 0;
+    loadedDLLTryies++;
+    std::wcout << loadedDLLTryies << L" checking: " << i << endl;
 
     auto hdl = LoadLibrary(i);
     if (hdl != NULL)
     {
+        loadedDLL++;
+
+        DWORD result = 0;
+
+        std::vector<DWORD> indexes;
+
+        while (result != FLS_OUT_OF_INDEXES)
+        {
+            result = FlsAlloc(NULL);
+            indexes.push_back( result );
+        }
+
+        std::wcout << loadedDLL << L" Out of slots at attempt " << indexes.size() << endl;
+
+        for ( auto i : indexes )
+        {
+            ::FlsFree( i );
+        }
+
         EnumPrintProcessorDatatypesW = (BOOL(__cdecl*)(
             LPWSTR   pName,
             LPWSTR   pPrintProcessorName,
@@ -376,7 +399,7 @@ void CheckDLL(const wchar_t* i)
                 &dwNeeded,
                 &dwCount);
             auto err = GetLastError();
-            std::wcout << i << L"\n" << L"rtn: " << rtn << L", Error: " << err << L"\n" << std::flush;
+            std::wcout << loadedDLL << " " << i << L"\n" << L"rtn: " << rtn << L", Error: " << err << L"\n" << std::flush;
             PDATATYPES_INFO_1W buf = (PDATATYPES_INFO_1W)malloc(dwNeeded);
             if (buf)
             {
@@ -389,24 +412,24 @@ void CheckDLL(const wchar_t* i)
                     &dwNeeded,
                     &dwCount);
                 err = GetLastError();
-                std::wcout << L"rtn: " << rtn << L", Error: " << err << L"\n" << std::flush;
+                std::wcout << loadedDLL << " " << L"rtn: " << rtn << L", Error: " << err << L"\n" << std::flush;
                 if (rtn)
                 {
                     for (auto i = 0; i < dwCount; i++)
                     {
-                        std::wcout << buf[i].pName << L"\n" << std::flush;
+                        std::wcout << loadedDLL << " " << buf[i].pName << L"\n" << std::flush;
                     }
                 }
             }
         }
         else
         {
-            std::wcout << i << L" kein print processor\n" << std::flush;
+            std::wcout << loadedDLL << " " << i << L" kein print processor\n" << std::flush;
         }
     }
     else
     {
-        std::wcout << i << L" LoadLibrary failed: " << GetLastError();
+        std::wcout << loadedDLL << " " << i << L" LoadLibrary failed: " << GetLastError();
         std::wcout << "\n" << std::flush;
     }
 }
