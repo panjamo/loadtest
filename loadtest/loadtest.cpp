@@ -320,7 +320,6 @@ const wchar_t* pps[] = {
     if (loopDir)
     {
         using directory_iterator = filesystem::directory_iterator;
-        //for (const auto& dirEntry : directory_iterator(LR"(.)"))
         for (const auto& dirEntry : directory_iterator(folder))
             if (regex_match(dirEntry.path().c_str(), wregex(L".*\\.dll")))
                 CheckDLL(dirEntry.path().c_str());
