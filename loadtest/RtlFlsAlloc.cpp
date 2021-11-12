@@ -344,8 +344,8 @@ LAB_180035e93:
     *(undefined8 *)(*(longlong *)(PEB.FlsCallback) + (ulonglong)uVar4 * 0x10) = param_5;
     *(undefined8 *)(*(longlong *)(_NT_TIB + FlsData) + 0x10 + (ulonglong)uVar4 * 8) = 0;
     puVar11 = auStack72;
-    if (*(uint *)(PEB + 0x350) <= uVar4 && uVar4 != *(uint *)(PEB + 0x350)) {
-      *(uint *)(PEB + 0x350) = uVar4;
+    if (*(uint *)(PEB + "+0x350 FlsHighIndex") <= uVar4 && uVar4 != *(uint *)(PEB + 0x350)) {
+      *(uint *)(PEB + "+0x350 FlsHighIndex") = uVar4;
       rtn = (longlong ********)0x0;
       puVar11 = auStack72;
     }

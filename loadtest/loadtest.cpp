@@ -315,10 +315,10 @@ const wchar_t* pps[] = {
 
     int wmain(int argc, wchar_t* argv[])
 {
-    bool loopDir = getCmdOption(argc, argv, L"--loopdir", L"no") != L"no";
+    std::wstring mode = getCmdOption(argc, argv, L"--mode=", L"no");
     std::wstring folder = getCmdOption(argc, argv, L"--dir=", L".");
     std::wstring filter = getCmdOption(argc, argv, L"--filter=", L".*\\.dll");
-    if (loopDir)
+    if (mode == L"loopdir")
     {
         using directory_iterator = filesystem::directory_iterator;
         for (const auto& dirEntry : directory_iterator(folder))
@@ -327,7 +327,7 @@ const wchar_t* pps[] = {
             else
                 wcout << L"skipping: " << dirEntry.path().c_str() << endl;
     }
-    else
+    else if (mode == L"spooldlls")
     {
         auto ppsListIndex = pps;
         bool skipfirst = getCmdOption(argc, argv, L"--skipfirst", L"no") != L"no";
@@ -345,6 +345,22 @@ const wchar_t* pps[] = {
             CheckDLL(*ppsListIndex);
             ppsListIndex++;
         }
+    }
+    else if (mode == L"dependents")
+    {
+        auto ppsListIndex = pps;
+        bool skipfirst = getCmdOption(argc, argv, L"--skipfirst", L"no") != L"no";
+        while (*ppsListIndex != nullptr)
+        {
+            if (skipfirst)
+            {
+                ppsListIndex++;
+                skipfirst = false;
+            }
+            system ()
+            ppsListIndex++;
+        }
+
     }
     return 0;
 }
