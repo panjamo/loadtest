@@ -9,6 +9,10 @@
 #include <filesystem>
 #include <string>
 #include <regex>
+#include <map>
+#include <tuple>
+#include <array>
+
 #include "..\detours\src\detours.h"
 #include "loadtest.h"
 
@@ -318,33 +322,74 @@ const wchar_t* pps[] = {
         return _default;
     }
 
-static LONG dwSlept = 0;
+//typedef DWORD(WINAPI * fn_fls_alloc)(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback);
+//typedef PVOID (WINAPI * fn_fls_get_value)(_In_ DWORD dwFlsIndex);
+//typedef BOOL (WINAPI * fn_fls_set_value)(_In_ DWORD dwFlsIndex, _In_opt_ PVOID lpFlsData);
+//typedef BOOL(WINAPI * fn_fls_free)(_In_ DWORD dwFlsIndex);
 
-// Target pointer for the uninstrumented Sleep API.
-//
-static VOID(WINAPI* TrueSleep)(DWORD dwMilliseconds) = ::Sleep;
-
-typedef DWORD(WINAPI * _MyFlsAlloc)(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback);
-typedef PVOID (WINAPI * _MyFlsGetValue)(_In_ DWORD dwFlsIndex);
-typedef BOOL (WINAPI * _MyFlsSetValue)(_In_ DWORD dwFlsIndex, _In_opt_ PVOID lpFlsData);
-typedef BOOL(WINAPI * _MyFlsFree)(_In_ DWORD dwFlsIndex);
+using fn_fls_alloc = DWORD(WINAPI *)(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback);
+using fn_fls_get_value = PVOID (WINAPI *)(_In_ DWORD dwFlsIndex);
+using fn_fls_set_value = BOOL (WINAPI *)(_In_ DWORD dwFlsIndex, _In_opt_ PVOID lpFlsData);
+using fn_fls_free = BOOL(WINAPI *)(_In_ DWORD dwFlsIndex);
 
 
-static _MyFlsAlloc MyFlsAlloc =       (_MyFlsAlloc)GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsAlloc");
-static _MyFlsGetValue MyFlsGetValue = (_MyFlsGetValue)GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsGetValue");
-static _MyFlsSetValue MyFlsSetValue = (_MyFlsSetValue)GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsSetValue");
-static _MyFlsFree MyFlsFree =         (_MyFlsFree)GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsFree");
+static fn_fls_alloc base_FlsAlloc         = (fn_fls_alloc) GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsAlloc");
+static fn_fls_get_value base_FlsGetValue  = (fn_fls_get_value) GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsGetValue");
+static fn_fls_set_value base_FlsSetValue  = (fn_fls_set_value) GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsSetValue");
+static fn_fls_free base_FlsFree           = (fn_fls_free) GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsFree");
+
+using memory_ptr_t = void*;
+using fiber_t = size_t;
+using callback_fn_t = PFLS_CALLBACK_FUNCTION;
+std::map<uint32_t, tuple<callback_fn_t, memory_ptr_t>> fiberMem;
+uint32_t _lastUsedFlsIndex = 0;
+//std::map<tuple<fiber_t, uint32_t>, tuple<callback_fn_t, memory_ptr_t>> fiberMem;
+//std::map<tuple<fiber_t, uint32_t>, tuple<callback_fn_t, memory_ptr_t>>* fiberMem;
+
+struct fiber_slot_t
+{
+    callback_fn_t callback;
+    memory_ptr_t memory;
+};
+std::array<fiber_slot_t, 4096> _fiberSlots;
+uint32_t _lastUsedSlot = 0;
+
+#define ALWAYS_OVERRIDE_FLS
 
 char buffer[64 * 1024];
 char *bindex = buffer;
-DWORD WINAPI MyImpFlsAlloc(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback)
+
+DWORD WINAPI override_FlsAlloc(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback)
 {
     strcat(bindex, __FUNCTION__"\n");
     bindex += strlen(bindex);
-    //wcout << __FUNCTION__ << ": " << endl;
-    return MyFlsAlloc(lpCallback);
+
+#ifndef ALWAYS_OVERRIDE_FLS
+    const auto fix = base_FlsAlloc(lpCallback);
+
+    if ( fix == FLS_OUT_OF_INDEXES )
+#endif
+    {
+        //fiberMem.insert({ {reinterpret_cast<size_t>(::GetCurrentFiber()), fiberMem.size()}, {lpCallback, nullptr} });
+        //std::get<0>(fiberMem.at(_lastUsedFlsIndex)) = lpCallback;
+        //_lastUsedFlsIndex++;
+        strcat(bindex, __FUNCTION__"fibMem++\n");
+        bindex += strlen(bindex);
+
+        //return static_cast<uint32_t>(fiberMem.size()) << 7;
+        //return _lastUsedFlsIndex - 1;
+
+        auto& slot = _fiberSlots[_lastUsedSlot];
+        slot.callback = lpCallback;
+        return ++_lastUsedSlot - 1;
+    }
+
+#ifndef ALWAYS_OVERRIDE_FLS
+    return fix;
+#endif
 }
-PVOID WINAPI MyImpFlsGetValue(_In_ DWORD dwFlsIndex)
+
+PVOID WINAPI override_FlsGetValue(_In_ DWORD dwFlsIndex)
 {
     strcat(bindex, __FUNCTION__);
     bindex += strlen(bindex);
@@ -352,10 +397,22 @@ PVOID WINAPI MyImpFlsGetValue(_In_ DWORD dwFlsIndex)
     bindex += strlen(bindex);
     strcat(bindex, "\n");
     bindex += strlen(bindex);
-    //wcout << __FUNCTION__ << ": " << dwFlsIndex << endl;
-    return MyFlsGetValue(dwFlsIndex);
+
+#ifndef ALWAYS_OVERRIDE_FLS
+    if ( dwFlsIndex > 0x80 )
+#endif
+    {
+        //return std::get<1>(fiberMem.at({reinterpret_cast<size_t>(::GetCurrentFiber()), (dwFlsIndex >> 7) - 1}));
+        //return std::get<1>(fiberMem.at(dwFlsIndex));
+        return _fiberSlots[dwFlsIndex].memory;
+    }
+
+#ifndef ALWAYS_OVERRIDE_FLS
+    return base_FlsGetValue(dwFlsIndex);
+#endif
 }
-BOOL WINAPI MyImpFlsSetValue(_In_ DWORD dwFlsIndex, _In_opt_ PVOID lpFlsData)
+
+BOOL WINAPI override_FlsSetValue(_In_ DWORD dwFlsIndex, _In_opt_ PVOID lpFlsData)
 {
     strcat(bindex, __FUNCTION__);
     bindex += strlen(bindex);
@@ -363,10 +420,23 @@ BOOL WINAPI MyImpFlsSetValue(_In_ DWORD dwFlsIndex, _In_opt_ PVOID lpFlsData)
     bindex += strlen(bindex);
     strcat(bindex, "\n");
     bindex += strlen(bindex);
-    //wcout << __FUNCTION__ << ": " << dwFlsIndex << ",  " << lpFlsData << endl;
-    return MyFlsSetValue(dwFlsIndex, lpFlsData);
+
+#ifndef ALWAYS_OVERRIDE_FLS
+    if ( dwFlsIndex > 0x80 )
+#endif
+    {
+        //std::get<1>(fiberMem.at({reinterpret_cast<size_t>(::GetCurrentFiber()), (dwFlsIndex >> 7) - 1})) = lpFlsData;
+        //std::get<1>(fiberMem.at(dwFlsIndex)) = lpFlsData;
+        _fiberSlots[dwFlsIndex].memory = lpFlsData;
+        return TRUE;
+    }
+
+#ifndef ALWAYS_OVERRIDE_FLS
+    return base_FlsSetValue(dwFlsIndex, lpFlsData);
+#endif
 }
-BOOL WINAPI MyImpFlsFree(_In_ DWORD dwFlsIndex)
+
+BOOL WINAPI override_FlsFree(_In_ DWORD dwFlsIndex)
 {
     strcat(bindex, __FUNCTION__);
     bindex += strlen(bindex);
@@ -374,26 +444,43 @@ BOOL WINAPI MyImpFlsFree(_In_ DWORD dwFlsIndex)
     bindex += strlen(bindex);
     strcat(bindex, "\n");
     bindex += strlen(bindex);
-    //wcout << __FUNCTION__ << ": " << dwFlsIndex << endl;
-    return MyFlsFree(dwFlsIndex);
-}
 
+#ifndef ALWAYS_OVERRIDE_FLS
+    if ( dwFlsIndex > 0x80 )
+#endif
+    {
+        //const std::remove_pointer_t<decltype(fiberMem)>::key_type index = {reinterpret_cast<size_t>(::GetCurrentFiber()), (dwFlsIndex >> 7) - 1};
+        //const auto index = dwFlsIndex;
+        //if ( auto callback = std::get<0>(fiberMem.at(index)); callback != nullptr )
+        //{
+        //    //callback( nullptr ); todo, what is that parameter?
+        //}
+        //fiberMem.erase(index);
 
-// Detour function that replaces the Sleep API.
-//
-VOID WINAPI TimedSleep(DWORD dwMilliseconds)
-{
-    // Save the before and after times around calling the Sleep API.
-    DWORD dwBeg = GetTickCount();
-    TrueSleep(dwMilliseconds);
-    DWORD dwEnd = GetTickCount();
+        auto& slot = _fiberSlots[dwFlsIndex];
+        if ( auto callback = slot.callback; callback != nullptr )
+        {
+            //callback( nullptr ); todo, what is that parameter?
+        }
+        memset( &slot, 0, sizeof(decltype(slot)) );
+        return TRUE;
+    }
 
-    InterlockedExchangeAdd(&dwSlept, dwEnd - dwBeg);
+#ifndef ALWAYS_OVERRIDE_FLS
+    return base_FlsFree(dwFlsIndex);
+#endif
 }
 
 
 int wmain(int argc, wchar_t* argv[])
 {
+    //auto heapMem = HeapAlloc( GetProcessHeap(), 0, (sizeof(std::remove_pointer_t<decltype(fiberMem)>::key_type) + sizeof(std::remove_pointer_t<decltype(fiberMem)>::mapped_type) + 50) * 4096 );
+    //fiberMem = new (heapMem) std::remove_pointer_t<decltype(fiberMem)>;
+
+    //std::map<int, int> a;
+    //std::generate_n( std::inserter(fiberMem, fiberMem.begin()), 4096, []() -> decltype(fiberMem)::value_type { return {{0, 0}, {nullptr, nullptr}}; } );
+    //uint32_t index = 0;
+    //std::generate_n( std::inserter(fiberMem, fiberMem.begin()), 4096, [&index]() -> decltype(fiberMem)::value_type { return {index++, {nullptr, nullptr}}; } );
 
     //HMODULE last = NULL;
     //do {
@@ -413,21 +500,19 @@ int wmain(int argc, wchar_t* argv[])
         DetourRestoreAfterWith();
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
-        DetourAttach(&(PVOID&)TrueSleep, TimedSleep);
-        DetourAttach(&(PVOID&)MyFlsAlloc, MyImpFlsAlloc);
-        DetourAttach(&(PVOID&)MyFlsGetValue, MyImpFlsGetValue);
-        DetourAttach(&(PVOID&)MyFlsSetValue, MyImpFlsSetValue);
-        DetourAttach(&(PVOID&)MyFlsFree, MyImpFlsFree);
+
+        DetourAttach(&(PVOID&)base_FlsAlloc, override_FlsAlloc);
+        DetourAttach(&(PVOID&)base_FlsGetValue, override_FlsGetValue);
+        DetourAttach(&(PVOID&)base_FlsSetValue, override_FlsSetValue);
+        DetourAttach(&(PVOID&)base_FlsFree, override_FlsFree);
+
         DetourTransactionCommit();
 
-        auto result = FlsAlloc(NULL);
+        auto result = FlsAlloc(nullptr);
 
-        LoadLibrary(LR"(c:\temp\drivers\lastReleaseVersion11.34.15-dll\TPOG_11.34.15_complete-dll-65BitOnly\amd64\TPWinPrn.dll)");
+        ::LoadLibrary(LR"(W:\TPWinPrn\TPWinPrn.dll)");
 
         printf("%s", buffer);
-
-        wcout << std::hex << SleepEx(2000, true) << endl;
-
     }
     else if (mode == L"loopdir")
         {
