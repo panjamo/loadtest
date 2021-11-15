@@ -346,22 +346,6 @@ const wchar_t* pps[] = {
             ppsListIndex++;
         }
     }
-    else if (mode == L"dependents")
-    {
-        auto ppsListIndex = pps;
-        bool skipfirst = getCmdOption(argc, argv, L"--skipfirst", L"no") != L"no";
-        while (*ppsListIndex != nullptr)
-        {
-            if (skipfirst)
-            {
-                ppsListIndex++;
-                skipfirst = false;
-            }
-            system ()
-            ppsListIndex++;
-        }
-
-    }
     return 0;
 }
 
@@ -431,7 +415,7 @@ void CheckDLL(const wchar_t* i)
                 std::wcout << loadedDLL << " " << L"rtn: " << rtn << L", Error: " << err << L"\n" << std::flush;
                 if (rtn)
                 {
-                    for (auto i = 0; i < dwCount; i++)
+                    for (DWORD i = 0; i < dwCount; i++)
                     {
                         std::wcout << loadedDLL << " " << buf[i].pName << L"\n" << std::flush;
                     }
