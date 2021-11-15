@@ -1,12 +1,17 @@
 // loadtest.cpp : This file contains the 'main' function. Program execution begins and ends there.
 //
+#define _CRT_SECURE_NO_WARNINGS
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <iostream>
+#include <stdio.h>
+#include <stdlib.h>
 #include <filesystem>
 #include <string>
 #include <regex>
+#include "..\detours\src\detours.h"
 #include "loadtest.h"
+
 using namespace std;
 
 BOOL
@@ -313,13 +318,119 @@ const wchar_t* pps[] = {
         return _default;
     }
 
-    int wmain(int argc, wchar_t* argv[])
+static LONG dwSlept = 0;
+
+// Target pointer for the uninstrumented Sleep API.
+//
+static VOID(WINAPI* TrueSleep)(DWORD dwMilliseconds) = ::Sleep;
+
+typedef DWORD(WINAPI * _MyFlsAlloc)(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback);
+typedef PVOID (WINAPI * _MyFlsGetValue)(_In_ DWORD dwFlsIndex);
+typedef BOOL (WINAPI * _MyFlsSetValue)(_In_ DWORD dwFlsIndex, _In_opt_ PVOID lpFlsData);
+typedef BOOL(WINAPI * _MyFlsFree)(_In_ DWORD dwFlsIndex);
+
+
+static _MyFlsAlloc MyFlsAlloc =       (_MyFlsAlloc)GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsAlloc");
+static _MyFlsGetValue MyFlsGetValue = (_MyFlsGetValue)GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsGetValue");
+static _MyFlsSetValue MyFlsSetValue = (_MyFlsSetValue)GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsSetValue");
+static _MyFlsFree MyFlsFree =         (_MyFlsFree)GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsFree");
+
+char buffer[64 * 1024];
+char *bindex = buffer;
+DWORD WINAPI MyImpFlsAlloc(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback)
 {
-    std::wstring mode = getCmdOption(argc, argv, L"--mode=", L"no");
+    strcat(bindex, __FUNCTION__"\n");
+    bindex += strlen(bindex);
+    //wcout << __FUNCTION__ << ": " << endl;
+    return MyFlsAlloc(lpCallback);
+}
+PVOID WINAPI MyImpFlsGetValue(_In_ DWORD dwFlsIndex)
+{
+    strcat(bindex, __FUNCTION__);
+    bindex += strlen(bindex);
+    _itoa(dwFlsIndex, bindex, 10);
+    bindex += strlen(bindex);
+    strcat(bindex, "\n");
+    bindex += strlen(bindex);
+    //wcout << __FUNCTION__ << ": " << dwFlsIndex << endl;
+    return MyFlsGetValue(dwFlsIndex);
+}
+BOOL WINAPI MyImpFlsSetValue(_In_ DWORD dwFlsIndex, _In_opt_ PVOID lpFlsData)
+{
+    strcat(bindex, __FUNCTION__);
+    bindex += strlen(bindex);
+    _itoa(dwFlsIndex, bindex, 10);
+    bindex += strlen(bindex);
+    strcat(bindex, "\n");
+    bindex += strlen(bindex);
+    //wcout << __FUNCTION__ << ": " << dwFlsIndex << ",  " << lpFlsData << endl;
+    return MyFlsSetValue(dwFlsIndex, lpFlsData);
+}
+BOOL WINAPI MyImpFlsFree(_In_ DWORD dwFlsIndex)
+{
+    strcat(bindex, __FUNCTION__);
+    bindex += strlen(bindex);
+    _itoa(dwFlsIndex, bindex, 10);
+    bindex += strlen(bindex);
+    strcat(bindex, "\n");
+    bindex += strlen(bindex);
+    //wcout << __FUNCTION__ << ": " << dwFlsIndex << endl;
+    return MyFlsFree(dwFlsIndex);
+}
+
+
+// Detour function that replaces the Sleep API.
+//
+VOID WINAPI TimedSleep(DWORD dwMilliseconds)
+{
+    // Save the before and after times around calling the Sleep API.
+    DWORD dwBeg = GetTickCount();
+    TrueSleep(dwMilliseconds);
+    DWORD dwEnd = GetTickCount();
+
+    InterlockedExchangeAdd(&dwSlept, dwEnd - dwBeg);
+}
+
+
+int wmain(int argc, wchar_t* argv[])
+{
+
+    //HMODULE last = NULL;
+    //do {
+    //    last = DetourEnumerateModules(last);
+    //    wcout << __FUNCTION__ << ": " << last << endl;
+    //} while (last);
+
+    std::wstring mode = getCmdOption(argc, argv, L"--mode=", L"detours");
     std::wstring folder = getCmdOption(argc, argv, L"--dir=", L".");
     std::wstring filter = getCmdOption(argc, argv, L"--filter=", L".*\\.dll");
-    if (mode == L"loopdir")
+    if (mode == L"detours")
     {
+        if (DetourIsHelperProcess())
+        {
+            return TRUE;
+        }
+        DetourRestoreAfterWith();
+        DetourTransactionBegin();
+        DetourUpdateThread(GetCurrentThread());
+        DetourAttach(&(PVOID&)TrueSleep, TimedSleep);
+        DetourAttach(&(PVOID&)MyFlsAlloc, MyImpFlsAlloc);
+        DetourAttach(&(PVOID&)MyFlsGetValue, MyImpFlsGetValue);
+        DetourAttach(&(PVOID&)MyFlsSetValue, MyImpFlsSetValue);
+        DetourAttach(&(PVOID&)MyFlsFree, MyImpFlsFree);
+        DetourTransactionCommit();
+
+        auto result = FlsAlloc(NULL);
+
+        LoadLibrary(LR"(c:\temp\drivers\lastReleaseVersion11.34.15-dll\TPOG_11.34.15_complete-dll-65BitOnly\amd64\TPWinPrn.dll)");
+
+        printf("%s", buffer);
+
+        wcout << std::hex << SleepEx(2000, true) << endl;
+
+    }
+    else if (mode == L"loopdir")
+        {
         using directory_iterator = filesystem::directory_iterator;
         for (const auto& dirEntry : directory_iterator(folder))
             if (regex_match(dirEntry.path().c_str(), wregex(filter, regex_constants::icase)))

@@ -221,7 +221,7 @@
 //    +0x320 FlsCallback      : 0x00000243`6b065a30 _FLS_CALLBACK_INFO
 //    +0x328 FlsListHead      : _LIST_ENTRY [ 0x00000243`6b0655f0 - 0x00000243`6b0655f0 ]
 //    +0x338 FlsBitmap        : 0x00007ffe`470b5360 Void
-//    +0x340 FlsBitmapBits    : [4] 0x1fff   <-------------------------- Achtund Speicher im PEB
+//    +0x340 FlsBitmapBits    : [4] 0x1fff   <-------------------------- Achtung! Speicher im PEB
 //    +0x350 FlsHighIndex     : 0xc
 //    +0x358 WerRegistrationData : (null) 
 //    +0x360 WerShipAssertPtr : (null) 

@@ -114,7 +114,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>DETOURS_VERSION=0x4c0c1;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
@@ -129,9 +129,9 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>DETOURS_VERSION=0x4c0c1;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -142,9 +142,21 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\detours\src\creatwth.cpp" />
+    <ClCompile Include="..\detours\src\detours.cpp" />
+    <ClCompile Include="..\detours\src\disasm.cpp" />
+    <ClCompile Include="..\detours\src\disolarm.cpp" />
+    <ClCompile Include="..\detours\src\disolarm64.cpp" />
+    <ClCompile Include="..\detours\src\disolia64.cpp" />
+    <ClCompile Include="..\detours\src\disolx64.cpp" />
+    <ClCompile Include="..\detours\src\disolx86.cpp" />
+    <ClCompile Include="..\detours\src\image.cpp" />
+    <ClCompile Include="..\detours\src\modules.cpp" />
     <ClCompile Include="loadtest.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\detours\src\detours.h" />
+    <ClInclude Include="..\detours\src\detver.h" />
     <ClInclude Include="loadtest.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
