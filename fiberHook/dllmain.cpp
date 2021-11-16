@@ -2,6 +2,7 @@
 #include "pch.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <winspool.h>
 #include <iostream>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +14,102 @@
 #include <array>
 #include <detours.h>
 using namespace std;
+
+const wchar_t * const Datatypes[] = {
+    L"RAW",
+    L"RAW [FF appended]",
+    L"RAW [FF auto]",
+    L"NT EMF 1.003",
+    L"TEXT",
+    L"NT EMF 1.006",
+    L"NT EMF 1.007",
+    L"NT EMF 1.008",
+    L"TP EMZ 1.0",
+    L"TP EMF 1.0",
+    L"TP EMZ 2.0",
+    L"TP XPS 1.0",
+    0
+};
+
+#pragma comment(linker, "/export:EnumPrintProcessorDatatypesW=EnumPrintProcessorDatatypesW")
+BOOL CALLBACK
+        EnumPrintProcessorDatatypesW(LPWSTR  /*pName*/,
+            LPWSTR  /*pPrintProcessorName*/,
+            DWORD   /*Level*/,
+            LPBYTE  pDatatypes,
+            DWORD   cbBuf,
+            LPDWORD pcbNeeded,
+            LPDWORD pcReturned)
+    {
+        DATATYPES_INFO_1* pInfo1 = (DATATYPES_INFO_1*)pDatatypes;
+        wchar_t** pMyDatatypes = (wchar_t**)Datatypes;
+        size_t              cbTotal = 0;
+        LPBYTE              pEnd;
+
+
+        // Star assuming failed / no entries returned
+
+        *pcReturned = 0;
+
+        // Pick up pointer to end of buffer given
+
+        pEnd = (LPBYTE)pInfo1 + cbBuf;
+
+        // Add up the minimum buffer required
+
+        while (*pMyDatatypes)
+        {
+            cbTotal += wcslen(*pMyDatatypes) * sizeof(WCHAR) + sizeof(WCHAR) +
+                sizeof(DATATYPES_INFO_1);
+
+            pMyDatatypes++;
+        }
+
+        // Set the buffer length returned/required
+
+        *pcbNeeded = (DWORD)cbTotal;
+
+        // Fill in the array only if there is sufficient space to
+
+        if (cbTotal <= cbBuf)
+        {
+            // Pick up our list of supported data types
+            pMyDatatypes = (wchar_t**)Datatypes;
+
+            /**
+                Fill in the given buffer.  We put the data names at the end of
+                the buffer, working towards the front.  The structures are put
+                at the front, working towards the end.
+            **/
+
+            while (*pMyDatatypes)
+            {
+
+                pEnd -= wcslen(*pMyDatatypes) * sizeof(WCHAR) + sizeof(WCHAR);
+                wcscpy((LPWSTR)pEnd, *pMyDatatypes);
+                pInfo1->pName = (LPWSTR)pEnd;
+                pInfo1++;
+                (*pcReturned)++;
+
+                pMyDatatypes++;
+            }
+
+        }
+        else
+        {
+            // Caller didn't have large enough buffer, set error and return
+            SetLastError(ERROR_INSUFFICIENT_BUFFER);
+            return FALSE;
+        }
+
+        // Return success
+
+        return TRUE;
+    }
+
+
+
+
 
 //typedef DWORD(WINAPI * fn_fls_alloc)(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback);
 //typedef PVOID (WINAPI * fn_fls_get_value)(_In_ DWORD dwFlsIndex);
