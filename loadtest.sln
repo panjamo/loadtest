@@ -7,7 +7,7 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "loadtest", "loadtest\loadte
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "spoolerLoader", "spoolerLoader\spoolerLoader.vcxproj", "{EFE4FB96-B7D6-4D64-ACDC-1652E73A6B67}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "fiberHook", "fiberHook\fiberHook.vcxproj", "{79A5F9CA-6335-4F6B-B1F1-DFF3D6E47DC0}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TPSplFlsHK", "TPSplFlsHK\TPSplFlsHK.vcxproj", "{79A5F9CA-6335-4F6B-B1F1-DFF3D6E47DC0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

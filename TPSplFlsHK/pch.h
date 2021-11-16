@@ -9,6 +9,8 @@
 
 // add headers that you want to pre-compile here
 #define _CRT_SECURE_NO_WARNINGS
+#define WIN32_LEAN_AND_MEAN
+
 #include "framework.h"
 
 #endif //PCH_H

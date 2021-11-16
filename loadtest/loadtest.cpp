@@ -4,16 +4,10 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <iostream>
-#include <stdio.h>
-#include <stdlib.h>
 #include <filesystem>
 #include <string>
 #include <regex>
-#include <map>
-#include <tuple>
-#include <array>
 
-#include "..\detours\src\detours.h"
 #include "loadtest.h"
 
 using namespace std;
