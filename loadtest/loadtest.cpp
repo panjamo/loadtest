@@ -374,18 +374,18 @@ void CheckDLL(const wchar_t* i)
 
         std::vector<DWORD> indexes;
 
-        while (result != FLS_OUT_OF_INDEXES)
-        {
-            result = FlsAlloc(NULL);
-            indexes.push_back( result );
-        }
+        //while (result != FLS_OUT_OF_INDEXES)
+        //{
+        //    result = FlsAlloc(NULL);
+        //    indexes.push_back( result );
+        //}
 
-        std::wcout << loadedDLL << L" Out of slots at attempt " << indexes.size() << endl;
+        //std::wcout << loadedDLL << L" Out of slots at attempt " << indexes.size() << endl;
 
-        for ( auto i : indexes )
-        {
-            ::FlsFree( i );
-        }
+        //for ( auto i : indexes )
+        //{
+        //    ::FlsFree( i );
+        //}
 
         EnumPrintProcessorDatatypesW = (BOOL(__cdecl*)(
             LPWSTR   pName,

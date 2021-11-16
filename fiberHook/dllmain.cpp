@@ -48,7 +48,7 @@ std::array<fiber_slot_t, 4096> _fiberSlots;
 uint32_t _lastUsedSlot = 0x80;
 
 #define ALWAYS_OVERRIDE_FLS
-#define BLOG
+// #define BLOG
 
 #ifdef BLOG
 char buffer[64 * 1024];
