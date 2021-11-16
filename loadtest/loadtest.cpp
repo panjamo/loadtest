@@ -355,15 +355,19 @@ std::array<fiber_slot_t, 4096> _fiberSlots;
 uint32_t _lastUsedSlot = 0;
 
 #define ALWAYS_OVERRIDE_FLS
+//#define BLOG
 
+#ifdef BLOG
 char buffer[64 * 1024];
 char *bindex = buffer;
+#endif
 
 DWORD WINAPI override_FlsAlloc(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback)
 {
+#ifdef BLOG
     strcat(bindex, __FUNCTION__"\n");
     bindex += strlen(bindex);
-
+#endif
 #ifndef ALWAYS_OVERRIDE_FLS
     const auto fix = base_FlsAlloc(lpCallback);
 
@@ -373,9 +377,10 @@ DWORD WINAPI override_FlsAlloc(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback)
         //fiberMem.insert({ {reinterpret_cast<size_t>(::GetCurrentFiber()), fiberMem.size()}, {lpCallback, nullptr} });
         //std::get<0>(fiberMem.at(_lastUsedFlsIndex)) = lpCallback;
         //_lastUsedFlsIndex++;
+#ifdef BLOG
         strcat(bindex, __FUNCTION__"fibMem++\n");
         bindex += strlen(bindex);
-
+#endif
         //return static_cast<uint32_t>(fiberMem.size()) << 7;
         //return _lastUsedFlsIndex - 1;
 
@@ -391,13 +396,14 @@ DWORD WINAPI override_FlsAlloc(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback)
 
 PVOID WINAPI override_FlsGetValue(_In_ DWORD dwFlsIndex)
 {
+#ifdef BLOG
     strcat(bindex, __FUNCTION__);
     bindex += strlen(bindex);
     _itoa(dwFlsIndex, bindex, 10);
     bindex += strlen(bindex);
     strcat(bindex, "\n");
     bindex += strlen(bindex);
-
+#endif
 #ifndef ALWAYS_OVERRIDE_FLS
     if ( dwFlsIndex > 0x80 )
 #endif
@@ -414,13 +420,14 @@ PVOID WINAPI override_FlsGetValue(_In_ DWORD dwFlsIndex)
 
 BOOL WINAPI override_FlsSetValue(_In_ DWORD dwFlsIndex, _In_opt_ PVOID lpFlsData)
 {
+#ifdef BLOG
     strcat(bindex, __FUNCTION__);
     bindex += strlen(bindex);
     _itoa(dwFlsIndex, bindex, 10);
     bindex += strlen(bindex);
     strcat(bindex, "\n");
     bindex += strlen(bindex);
-
+#endif
 #ifndef ALWAYS_OVERRIDE_FLS
     if ( dwFlsIndex > 0x80 )
 #endif
@@ -438,13 +445,14 @@ BOOL WINAPI override_FlsSetValue(_In_ DWORD dwFlsIndex, _In_opt_ PVOID lpFlsData
 
 BOOL WINAPI override_FlsFree(_In_ DWORD dwFlsIndex)
 {
+#ifdef BLOG
     strcat(bindex, __FUNCTION__);
     bindex += strlen(bindex);
     _itoa(dwFlsIndex, bindex, 10);
     bindex += strlen(bindex);
     strcat(bindex, "\n");
     bindex += strlen(bindex);
-
+#endif
 #ifndef ALWAYS_OVERRIDE_FLS
     if ( dwFlsIndex > 0x80 )
 #endif
@@ -509,10 +517,13 @@ int wmain(int argc, wchar_t* argv[])
         DetourTransactionCommit();
 
         auto result = FlsAlloc(nullptr);
+#ifdef BLOG
+        printf("%s\n", buffer);
+#endif
+        puts("hallo keule\n");
+        ::LoadLibrary(LR"(c:\temp\drivers\lastReleaseVersion11.34.15-dll\TPOG_11.34.15_complete-dll-65BitOnly\amd64\TPWinPrn.dll)");
 
-        ::LoadLibrary(LR"(W:\TPWinPrn\TPWinPrn.dll)");
-
-        printf("%s", buffer);
+        puts("hallo keule\n");
     }
     else if (mode == L"loopdir")
         {
