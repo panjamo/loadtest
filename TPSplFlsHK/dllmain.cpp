@@ -11,6 +11,7 @@
 #include <detours.h>
 
 using namespace std;
+EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 
 constexpr const wchar_t* c_DataTypes[] = {
     L"RAW",
@@ -38,22 +39,20 @@ EnumPrintProcessorDatatypesW(LPWSTR  /*pName*/,
     LPDWORD pcbNeeded,
     LPDWORD pcReturned)
 {
+    static HMODULE avoidUnloadingThisDLL = NULL;
+    if (avoidUnloadingThisDLL == NULL)
+    {
+        char szModuleNameRaw[MAX_PATH];
+        ::GetModuleFileNameA((HINSTANCE)&__ImageBase, szModuleNameRaw, MAX_PATH);
+        ::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_PIN, szModuleNameRaw, &avoidUnloadingThisDLL);
+    }
+
     DATATYPES_INFO_1* pInfo1 = (DATATYPES_INFO_1*)pDatatypes;
     wchar_t** pMyDatatypes = (wchar_t**)c_DataTypes;
     size_t              cbTotal = 0;
     LPBYTE              pEnd;
-
-
-    // Star assuming failed / no entries returned
-
     *pcReturned = 0;
-
-    // Pick up pointer to end of buffer given
-
     pEnd = (LPBYTE)pInfo1 + cbBuf;
-
-    // Add up the minimum buffer required
-
     while ( *pMyDatatypes )
     {
         cbTotal += wcslen(*pMyDatatypes) * sizeof(WCHAR) + sizeof(WCHAR) +
@@ -61,24 +60,10 @@ EnumPrintProcessorDatatypesW(LPWSTR  /*pName*/,
 
         pMyDatatypes++;
     }
-
-    // Set the buffer length returned/required
-
     *pcbNeeded = (DWORD)cbTotal;
-
-    // Fill in the array only if there is sufficient space to
-
     if ( cbTotal <= cbBuf )
     {
-        // Pick up our list of supported data types
         pMyDatatypes = (wchar_t**)c_DataTypes;
-
-        /**
-            Fill in the given buffer.  We put the data names at the end of
-            the buffer, working towards the front.  The structures are put
-            at the front, working towards the end.
-        **/
-
         while ( *pMyDatatypes )
         {
             pEnd -= wcslen(*pMyDatatypes) * sizeof(WCHAR) + sizeof(WCHAR);
@@ -92,13 +77,9 @@ EnumPrintProcessorDatatypesW(LPWSTR  /*pName*/,
     }
     else
     {
-        // Caller didn't have large enough buffer, set error and return
         SetLastError(ERROR_INSUFFICIENT_BUFFER);
         return FALSE;
     }
-
-    // Return success
-
     return TRUE;
 }
 
@@ -156,7 +137,8 @@ DWORD WINAPI override_FlsAlloc(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback)
 
     if ( i == g_fiber_slots.size() )
     {
-        return STATUS_NO_MEMORY;
+        SetLastError(STATUS_NO_MEMORY);
+        return FLS_OUT_OF_INDEXES;
     }
 
     auto& slot = g_fiber_slots[i];
@@ -170,9 +152,9 @@ BOOL WINAPI override_FlsFree(_In_ DWORD dwFlsIndex)
     {
         return base_FlsFree(dwFlsIndex);
     }
-    if ( (dwFlsIndex - g_biggest_known_slot) < g_fiber_slots.size() )
+    if ( (dwFlsIndex - g_biggest_known_slot - 1) < g_fiber_slots.size() )
     {
-        if ( auto& slot = g_fiber_slots[dwFlsIndex - g_biggest_known_slot]; 
+        if ( auto& slot = g_fiber_slots[dwFlsIndex - g_biggest_known_slot - 1]; 
             slot.callback != reinterpret_cast<decltype(fiber_slot_t::callback)>(~static_cast<size_t>(0)) && slot.callback != nullptr )
         {
             slot.callback( slot.memory );
@@ -190,9 +172,9 @@ PVOID WINAPI override_FlsGetValue(_In_ DWORD dwFlsIndex)
     {
         return base_FlsGetValue(dwFlsIndex);
     }
-    if ( (dwFlsIndex - g_biggest_known_slot) < g_fiber_slots.size() )
+    if ( (dwFlsIndex - g_biggest_known_slot - 1) < g_fiber_slots.size() )
     {
-        return g_fiber_slots[dwFlsIndex - g_biggest_known_slot].memory;
+        return g_fiber_slots[dwFlsIndex - g_biggest_known_slot - 1].memory;
     }
 
     SetLastError( STATUS_INVALID_PARAMETER );
@@ -205,9 +187,9 @@ BOOL WINAPI override_FlsSetValue(_In_ DWORD dwFlsIndex, _In_opt_ PVOID lpFlsData
     {
         return base_FlsSetValue(dwFlsIndex, lpFlsData);
     }
-    if ( (dwFlsIndex - g_biggest_known_slot) < g_fiber_slots.size() )
+    if ( (dwFlsIndex - g_biggest_known_slot - 1) < g_fiber_slots.size() )
     {
-        g_fiber_slots[dwFlsIndex - g_biggest_known_slot].memory = lpFlsData;
+        g_fiber_slots[dwFlsIndex - g_biggest_known_slot - 1].memory = lpFlsData;
         return TRUE;
     }
     SetLastError( STATUS_INVALID_PARAMETER );
@@ -241,7 +223,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
     case DLL_PROCESS_DETACH:
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
-        //DetourDetach(&(PVOID&)Real_Echo, Mine_Echo);
         DetourDetach(&(PVOID&)base_FlsAlloc, override_FlsAlloc);
         DetourDetach(&(PVOID&)base_FlsGetValue, override_FlsGetValue);
         DetourDetach(&(PVOID&)base_FlsSetValue, override_FlsSetValue);
