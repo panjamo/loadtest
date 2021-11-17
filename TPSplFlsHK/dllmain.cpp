@@ -94,17 +94,12 @@ static fn_fls_free base_FlsFree = (fn_fls_free)GetProcAddress(GetModuleHandleW(L
 static fn_fls_get_value base_FlsGetValue = (fn_fls_get_value)GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsGetValue");
 static fn_fls_set_value base_FlsSetValue = (fn_fls_set_value)GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsSetValue");
 
-//struct conversion_t
-//{
-//    void* from;
-//    void* to;
-//};
-//std::array c_Conversions = {
-//    conversion_t{reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsAlloc")), nullptr},
-//    conversion_t{reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsFree")), nullptr},
-//    conversion_t{reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsGetValue")), nullptr},
-//    conversion_t{reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsSetValue")), nullptr},
-//};
+enum class slot_allocation_e : uint32_t
+{
+    small_alloc = 128,
+    medium_alloc = 4096,
+    override_alloc = static_cast<uint32_t>(medium_alloc),
+};
 
 using memory_ptr_t = void*;
 using callback_fn_t = PFLS_CALLBACK_FUNCTION;
@@ -115,50 +110,60 @@ struct fiber_slot_t
     memory_ptr_t memory;
 };
 
-std::array<fiber_slot_t, 4096> g_fiber_slots;
-uint32_t g_biggest_known_slot = 0x7f;
+std::array<fiber_slot_t, static_cast<size_t>(slot_allocation_e::override_alloc)> g_fiber_slots;
+uint32_t g_last_index = 0;
 
 DWORD WINAPI override_FlsAlloc(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback)
 {
-    if ( const auto fix = base_FlsAlloc(lpCallback); fix != FLS_OUT_OF_INDEXES )
+    if ( const auto idx = base_FlsAlloc(lpCallback); idx != FLS_OUT_OF_INDEXES )
     {
-        g_biggest_known_slot = max( g_biggest_known_slot, fix );
-        return fix;
+        return idx;
     }
 
     uint32_t i;
-    for ( i = 0; i < g_fiber_slots.size(); ++i )
+    if ( g_last_index < g_fiber_slots.size() )
     {
-        if ( g_fiber_slots[i].callback == nullptr )
+        // fast path
+        i = g_last_index++;
+    }
+    else
+    {
+        // slow path
+        for ( i = 0; i < g_fiber_slots.size(); ++i )
         {
-            break;
+            if ( g_fiber_slots[i].callback == nullptr )
+            {
+                break;
+            }
         }
     }
 
     if ( i == g_fiber_slots.size() )
     {
-        SetLastError(STATUS_NO_MEMORY);
+        SetLastError( STATUS_NO_MEMORY );
         return FLS_OUT_OF_INDEXES;
     }
 
-    auto& slot = g_fiber_slots[i];
-    slot.callback = lpCallback ? lpCallback : reinterpret_cast<decltype(slot.callback)>(~static_cast<size_t>(0));
-    return (g_biggest_known_slot + 1) + i;
+    g_fiber_slots[i].callback = lpCallback != nullptr ? lpCallback : reinterpret_cast<decltype(fiber_slot_t::callback)>(~static_cast<size_t>(0));
+    return static_cast<uint32_t>(slot_allocation_e::small_alloc) + i;
 }
 
 BOOL WINAPI override_FlsFree(_In_ DWORD dwFlsIndex)
 {
-    if ( dwFlsIndex <= g_biggest_known_slot )
+    if ( base_FlsFree(dwFlsIndex) && ::GetLastError() != STATUS_INVALID_PARAMETER )
     {
-        return base_FlsFree(dwFlsIndex);
+        return TRUE;
     }
-    if ( (dwFlsIndex - g_biggest_known_slot - 1) < g_fiber_slots.size() )
+
+    dwFlsIndex -= static_cast<uint32_t>(slot_allocation_e::small_alloc);
+    if ( dwFlsIndex < g_fiber_slots.size() )
     {
-        if ( auto& slot = g_fiber_slots[dwFlsIndex - g_biggest_known_slot - 1]; 
+        if ( auto& slot = g_fiber_slots[dwFlsIndex]; 
             slot.callback != reinterpret_cast<decltype(fiber_slot_t::callback)>(~static_cast<size_t>(0)) && slot.callback != nullptr )
         {
             slot.callback( slot.memory );
-            memset( &slot, 0, sizeof(decltype(slot)) );
+            slot.callback = nullptr;
+            slot.memory = nullptr;
             return TRUE;
         }
     }
@@ -168,13 +173,14 @@ BOOL WINAPI override_FlsFree(_In_ DWORD dwFlsIndex)
 
 PVOID WINAPI override_FlsGetValue(_In_ DWORD dwFlsIndex)
 {
-    if ( dwFlsIndex <= g_biggest_known_slot )
+    if ( dwFlsIndex < static_cast<uint32_t>(slot_allocation_e::small_alloc) )
     {
         return base_FlsGetValue(dwFlsIndex);
     }
-    if ( (dwFlsIndex - g_biggest_known_slot - 1) < g_fiber_slots.size() )
+    dwFlsIndex -= static_cast<uint32_t>(slot_allocation_e::small_alloc);
+    if ( dwFlsIndex < g_fiber_slots.size() )
     {
-        return g_fiber_slots[dwFlsIndex - g_biggest_known_slot - 1].memory;
+        return g_fiber_slots[dwFlsIndex].memory;
     }
 
     SetLastError( STATUS_INVALID_PARAMETER );
@@ -183,21 +189,44 @@ PVOID WINAPI override_FlsGetValue(_In_ DWORD dwFlsIndex)
 
 BOOL WINAPI override_FlsSetValue(_In_ DWORD dwFlsIndex, _In_opt_ PVOID lpFlsData)
 {
-    if ( dwFlsIndex <= g_biggest_known_slot )
+    if ( dwFlsIndex < static_cast<uint32_t>(slot_allocation_e::small_alloc) )
     {
         return base_FlsSetValue(dwFlsIndex, lpFlsData);
     }
-    if ( (dwFlsIndex - g_biggest_known_slot - 1) < g_fiber_slots.size() )
+    dwFlsIndex -= static_cast<uint32_t>(slot_allocation_e::small_alloc);
+    if ( dwFlsIndex < g_fiber_slots.size() )
     {
-        g_fiber_slots[dwFlsIndex - g_biggest_known_slot - 1].memory = lpFlsData;
+        g_fiber_slots[dwFlsIndex].memory = lpFlsData;
         return TRUE;
     }
     SetLastError( STATUS_INVALID_PARAMETER );
     return FALSE;
 }
 
+slot_allocation_e determine_system_fls_slot_alloc_max()
+{
+    std::vector<uint32_t> slots;
+    slots.reserve( static_cast<size_t>(slot_allocation_e::small_alloc) + 1 );
+    while ( slots.emplace_back( ::FlsAlloc( nullptr ) ) != FLS_OUT_OF_INDEXES && slots.size() <= static_cast<size_t>(slot_allocation_e::small_alloc) )
+    {
+    }
+    for ( const auto& idx : slots )
+    {
+        ::FlsFree( idx );
+    }
+    return slots.size() >= static_cast<size_t>(slot_allocation_e::small_alloc) ? slot_allocation_e::medium_alloc : slot_allocation_e::small_alloc;
+}
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 {
+    const auto slot_alloc = determine_system_fls_slot_alloc_max();
+    if ( slot_alloc == slot_allocation_e::medium_alloc )
+    {
+        ::OutputDebugStringW( L"TPSpoolFlsHook: Omitting Fls* hooks, because OS supports enough slots already\n" );
+        return TRUE;
+    }
+    ::OutputDebugStringW( L"TPSpoolFlsHook: Registering Fls* hooks, because OS does not support enough slots\n" );
+
     switch ( ul_reason_for_call )
     {
     case DLL_PROCESS_ATTACH:
