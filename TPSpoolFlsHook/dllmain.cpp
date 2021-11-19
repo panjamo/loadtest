@@ -88,11 +88,14 @@ using fn_fls_alloc = DWORD(WINAPI*)(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback);
 using fn_fls_free = BOOL(WINAPI*)(_In_ DWORD dwFlsIndex);
 using fn_fls_get_value = PVOID(WINAPI*)(_In_ DWORD dwFlsIndex);
 using fn_fls_set_value = BOOL(WINAPI*)(_In_ DWORD dwFlsIndex, _In_opt_ PVOID lpFlsData);
+using fn_switchtofiber = void (WINAPI*)(_In_ LPVOID lpFiber);
 
 static fn_fls_alloc base_FlsAlloc = (fn_fls_alloc)GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsAlloc");
 static fn_fls_free base_FlsFree = (fn_fls_free)GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsFree");
 static fn_fls_get_value base_FlsGetValue = (fn_fls_get_value)GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsGetValue");
 static fn_fls_set_value base_FlsSetValue = (fn_fls_set_value)GetProcAddress(GetModuleHandleW(L"api-ms-win-core-fibers-l1-1-0.dll"), "FlsSetValue");
+static fn_switchtofiber base_SwitchToFiber = (fn_switchtofiber)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "SwitchToFiber");
+static fn_switchtofiber base_SwitchToFiber2 = (fn_switchtofiber)GetProcAddress(GetModuleHandleW(L"kernelbase.dll"), "SwitchToFiber");
 
 enum class slot_allocation_e : uint32_t
 {
@@ -110,6 +113,7 @@ struct fiber_slot_t
     memory_ptr_t memory;
 };
 
+CRITICAL_SECTION g_crit;
 std::array<fiber_slot_t, static_cast<size_t>(slot_allocation_e::override_alloc)> g_fiber_slots;
 uint32_t g_last_index = 0;
 
@@ -119,6 +123,8 @@ DWORD WINAPI override_FlsAlloc(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback)
     {
         return idx;
     }
+
+    ::EnterCriticalSection( &g_crit );
 
     uint32_t i;
     if ( g_last_index < g_fiber_slots.size() )
@@ -140,11 +146,13 @@ DWORD WINAPI override_FlsAlloc(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback)
 
     if ( i == g_fiber_slots.size() )
     {
+        ::LeaveCriticalSection( &g_crit );
         SetLastError( STATUS_NO_MEMORY );
         return FLS_OUT_OF_INDEXES;
     }
 
     g_fiber_slots[i].callback = lpCallback != nullptr ? lpCallback : reinterpret_cast<decltype(fiber_slot_t::callback)>(~static_cast<size_t>(0));
+    ::LeaveCriticalSection( &g_crit );
     return static_cast<uint32_t>(slot_allocation_e::small_alloc) + i;
 }
 
@@ -155,6 +163,7 @@ BOOL WINAPI override_FlsFree(_In_ DWORD dwFlsIndex)
         return TRUE;
     }
 
+    ::EnterCriticalSection( &g_crit );
     dwFlsIndex -= static_cast<uint32_t>(slot_allocation_e::small_alloc);
     if ( dwFlsIndex < g_fiber_slots.size() )
     {
@@ -164,10 +173,14 @@ BOOL WINAPI override_FlsFree(_In_ DWORD dwFlsIndex)
             slot.callback( slot.memory );
             slot.callback = nullptr;
             slot.memory = nullptr;
+
+            ::LeaveCriticalSection( &g_crit );
             return TRUE;
         }
     }
     SetLastError( STATUS_INVALID_PARAMETER );
+
+    ::LeaveCriticalSection( &g_crit );
     return FALSE;
 }
 
@@ -177,13 +190,19 @@ PVOID WINAPI override_FlsGetValue(_In_ DWORD dwFlsIndex)
     {
         return base_FlsGetValue(dwFlsIndex);
     }
+
+    ::EnterCriticalSection( &g_crit );
+
     dwFlsIndex -= static_cast<uint32_t>(slot_allocation_e::small_alloc);
     if ( dwFlsIndex < g_fiber_slots.size() )
     {
+        ::LeaveCriticalSection( &g_crit );
         return g_fiber_slots[dwFlsIndex].memory;
     }
 
     SetLastError( STATUS_INVALID_PARAMETER );
+
+    ::LeaveCriticalSection( &g_crit );
     return nullptr;
 }
 
@@ -193,14 +212,31 @@ BOOL WINAPI override_FlsSetValue(_In_ DWORD dwFlsIndex, _In_opt_ PVOID lpFlsData
     {
         return base_FlsSetValue(dwFlsIndex, lpFlsData);
     }
+
+    ::EnterCriticalSection( &g_crit );
+
     dwFlsIndex -= static_cast<uint32_t>(slot_allocation_e::small_alloc);
     if ( dwFlsIndex < g_fiber_slots.size() )
     {
         g_fiber_slots[dwFlsIndex].memory = lpFlsData;
+
+        ::LeaveCriticalSection( &g_crit );
         return TRUE;
     }
     SetLastError( STATUS_INVALID_PARAMETER );
+
+    ::LeaveCriticalSection( &g_crit );
     return FALSE;
+}
+
+void override_SwitchToFiber(_In_ LPVOID lpFiber)
+{
+    ::OutputDebugStringW( L"TPSpoolFlsHook: (!!!) SwitchToFiber was called!" );
+}
+
+void override_SwitchToFiber2(_In_ LPVOID lpFiber)
+{
+    ::OutputDebugStringW( L"TPSpoolFlsHook: (!!!) SwitchToFiber2 was called!" );
 }
 
 slot_allocation_e determine_system_fls_slot_alloc_max()
@@ -219,34 +255,29 @@ slot_allocation_e determine_system_fls_slot_alloc_max()
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 {
-    //switch ( ul_reason_for_call )
-    //{
-    //case DLL_PROCESS_ATTACH:
-    //    ::OutputDebugStringW(L"DllMain TPSpoolFlsHook: DLL_PROCESS_ATTACH\n");
-    //    break;
-    //case DLL_THREAD_ATTACH:
-    //    ::OutputDebugStringW(L"DllMain TPSpoolFlsHook: DLL_THREAD_ATTACH\n");
-    //    break;
-    //case DLL_THREAD_DETACH:
-    //    ::OutputDebugStringW(L"DllMain TPSpoolFlsHook: DLL_THREAD_DETACH\n");
-    //    break;
-    //case DLL_PROCESS_DETACH:
-    //    ::OutputDebugStringW(L"DllMain TPSpoolFlsHook: DLL_PROCESS_DETACH\n");
-    //    break;
-    //}
-
-    const auto slot_alloc = determine_system_fls_slot_alloc_max();
-    if ( slot_alloc == slot_allocation_e::medium_alloc )
+    if ( (ul_reason_for_call & (DLL_PROCESS_ATTACH | DLL_PROCESS_DETACH)) != 0 )
     {
-        ::OutputDebugStringW( L"TPSpoolFlsHook: Omitting Fls* hooks, because OS supports enough slots already\n" );
-        return TRUE;
+        const auto slot_alloc = determine_system_fls_slot_alloc_max();
+        if ( slot_alloc == slot_allocation_e::medium_alloc )
+        {
+            ::OutputDebugStringW( L"TPSpoolFlsHook: Omitting Fls* hooks, because OS supports enough slots already\n" );
+            return TRUE;
+        }
+        ::OutputDebugStringW( L"TPSpoolFlsHook: Registering Fls* hooks, because OS does not support enough slots\n" );
+
+        if ( ul_reason_for_call == DLL_PROCESS_ATTACH && !::InitializeCriticalSectionAndSpinCount( &g_crit, 4000 ) )
+        {
+            ::OutputDebugStringW( L"TPSpoolFlsHook: Could not initialize CriticalSection!\n" );
+        }
+        if ( ul_reason_for_call == DLL_PROCESS_DETACH && (::DeleteCriticalSection( &g_crit ), true) )
+        {
+            ::OutputDebugStringW( L"TPSpoolFlsHook: CriticalSection deleted!\n" );
+        }
     }
-    ::OutputDebugStringW( L"TPSpoolFlsHook: Registering Fls* hooks, because OS does not support enough slots\n" );
 
     switch ( ul_reason_for_call )
     {
     case DLL_PROCESS_ATTACH:
-        ::OutputDebugStringW(L"TPSpoolFlsHook: DLL_PROCESS_ATTACH");
         if ( DetourIsHelperProcess() )
         {
             return TRUE;
@@ -260,22 +291,25 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
         DetourAttach(&(PVOID&)base_FlsSetValue, override_FlsSetValue);
         DetourAttach(&(PVOID&)base_FlsFree, override_FlsFree);
 
+        DetourAttach(&(PVOID&)base_SwitchToFiber, override_SwitchToFiber);
+        DetourAttach(&(PVOID&)base_SwitchToFiber2, override_SwitchToFiber2);
+
         DetourTransactionCommit();
         break;
     case DLL_THREAD_ATTACH:
-        ::OutputDebugStringW(L"TPSpoolFlsHook: DLL_THREAD_ATTACH");
         break;
     case DLL_THREAD_DETACH:
-        ::OutputDebugStringW(L"TPSpoolFlsHook: DLL_THREAD_DETACH");
         break;
     case DLL_PROCESS_DETACH:
-        ::OutputDebugStringW(L"TPSpoolFlsHook: DLL_PROCESS_DETACH");
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
         DetourDetach(&(PVOID&)base_FlsAlloc, override_FlsAlloc);
         DetourDetach(&(PVOID&)base_FlsGetValue, override_FlsGetValue);
         DetourDetach(&(PVOID&)base_FlsSetValue, override_FlsSetValue);
         DetourDetach(&(PVOID&)base_FlsFree, override_FlsFree);
+
+        DetourDetach(&(PVOID&)base_SwitchToFiber, override_SwitchToFiber);
+        DetourDetach(&(PVOID&)base_SwitchToFiber2, override_SwitchToFiber2);
 
         auto error = DetourTransactionCommit();
         break;
