@@ -257,7 +257,7 @@ slot_allocation_e determine_system_fls_slot_alloc_max()
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 {
-    if (ul_reason_for_call == DLL_PROCESS_ATTACH || ul_reason_for_call == DLL_PROCESS_DETACH)
+    if ( ul_reason_for_call == DLL_PROCESS_ATTACH )
     {
         const auto slot_alloc = determine_system_fls_slot_alloc_max();
         if ( slot_alloc == slot_allocation_e::medium_alloc )
@@ -266,24 +266,20 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
             return TRUE;
         }
         ::OutputDebugStringW( L"TPSpoolFlsHook: Registering Fls* hooks, because OS does not support enough slots\n" );
-
-        if ( ul_reason_for_call == DLL_PROCESS_ATTACH && !::InitializeCriticalSectionAndSpinCount( &g_crit, 4000 ) )
-        {
-            ::OutputDebugStringW( L"TPSpoolFlsHook: Could not initialize CriticalSection!\n" );
-        }
-        if ( ul_reason_for_call == DLL_PROCESS_DETACH && (::DeleteCriticalSection( &g_crit ), true) )
-        {
-            ::OutputDebugStringW( L"TPSpoolFlsHook: CriticalSection deleted!\n" );
-        }
     }
 
     switch ( ul_reason_for_call )
     {
     case DLL_PROCESS_ATTACH:
+        if ( !::InitializeCriticalSectionAndSpinCount( &g_crit, 4000 ) )
+        {
+            ::OutputDebugStringW( L"TPSpoolFlsHook: Could not initialize CriticalSection!\n" );
+        }
         if ( DetourIsHelperProcess() )
         {
             return TRUE;
         }
+
         DetourRestoreAfterWith();
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
@@ -314,6 +310,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
         DetourDetach(&(PVOID&)base_SwitchToFiber2, override_SwitchToFiber2);
 
         auto error = DetourTransactionCommit();
+
+        ::DeleteCriticalSection( &g_crit );
         break;
     }
     return TRUE;
