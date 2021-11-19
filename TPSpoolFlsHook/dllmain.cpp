@@ -232,11 +232,13 @@ BOOL WINAPI override_FlsSetValue(_In_ DWORD dwFlsIndex, _In_opt_ PVOID lpFlsData
 void override_SwitchToFiber(_In_ LPVOID lpFiber)
 {
     ::OutputDebugStringW( L"TPSpoolFlsHook: (!!!) SwitchToFiber was called!" );
+    base_SwitchToFiber(lpFiber);
 }
 
 void override_SwitchToFiber2(_In_ LPVOID lpFiber)
 {
     ::OutputDebugStringW( L"TPSpoolFlsHook: (!!!) SwitchToFiber2 was called!" );
+    base_SwitchToFiber2(lpFiber);
 }
 
 slot_allocation_e determine_system_fls_slot_alloc_max()
@@ -255,7 +257,7 @@ slot_allocation_e determine_system_fls_slot_alloc_max()
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 {
-    if ( (ul_reason_for_call & (DLL_PROCESS_ATTACH | DLL_PROCESS_DETACH)) != 0 )
+    if (ul_reason_for_call == DLL_PROCESS_ATTACH || ul_reason_for_call == DLL_PROCESS_DETACH)
     {
         const auto slot_alloc = determine_system_fls_slot_alloc_max();
         if ( slot_alloc == slot_allocation_e::medium_alloc )
