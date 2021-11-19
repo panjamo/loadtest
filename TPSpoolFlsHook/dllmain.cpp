@@ -257,6 +257,7 @@ slot_allocation_e determine_system_fls_slot_alloc_max()
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 {
+    static bool redirected = false;
     if ( ul_reason_for_call == DLL_PROCESS_ATTACH )
     {
         const auto slot_alloc = determine_system_fls_slot_alloc_max();
@@ -271,13 +272,14 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
     switch ( ul_reason_for_call )
     {
     case DLL_PROCESS_ATTACH:
-        if ( !::InitializeCriticalSectionAndSpinCount( &g_crit, 4000 ) )
-        {
-            ::OutputDebugStringW( L"TPSpoolFlsHook: Could not initialize CriticalSection!\n" );
-        }
         if ( DetourIsHelperProcess() )
         {
             return TRUE;
+        }
+
+        if (!::InitializeCriticalSectionAndSpinCount(&g_crit, 4000))
+        {
+            ::OutputDebugStringW(L"TPSpoolFlsHook: Could not initialize CriticalSection!\n");
         }
 
         DetourRestoreAfterWith();
@@ -293,12 +295,15 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
         DetourAttach(&(PVOID&)base_SwitchToFiber2, override_SwitchToFiber2);
 
         DetourTransactionCommit();
+        redirected = true;
         break;
     case DLL_THREAD_ATTACH:
         break;
     case DLL_THREAD_DETACH:
         break;
     case DLL_PROCESS_DETACH:
+        if (!redirected)
+            break;
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
         DetourDetach(&(PVOID&)base_FlsAlloc, override_FlsAlloc);
