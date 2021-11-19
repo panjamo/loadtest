@@ -219,6 +219,22 @@ slot_allocation_e determine_system_fls_slot_alloc_max()
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 {
+    //switch ( ul_reason_for_call )
+    //{
+    //case DLL_PROCESS_ATTACH:
+    //    ::OutputDebugStringW(L"DllMain TPSpoolFlsHook: DLL_PROCESS_ATTACH\n");
+    //    break;
+    //case DLL_THREAD_ATTACH:
+    //    ::OutputDebugStringW(L"DllMain TPSpoolFlsHook: DLL_THREAD_ATTACH\n");
+    //    break;
+    //case DLL_THREAD_DETACH:
+    //    ::OutputDebugStringW(L"DllMain TPSpoolFlsHook: DLL_THREAD_DETACH\n");
+    //    break;
+    //case DLL_PROCESS_DETACH:
+    //    ::OutputDebugStringW(L"DllMain TPSpoolFlsHook: DLL_PROCESS_DETACH\n");
+    //    break;
+    //}
+
     const auto slot_alloc = determine_system_fls_slot_alloc_max();
     if ( slot_alloc == slot_allocation_e::medium_alloc )
     {
@@ -230,6 +246,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
     switch ( ul_reason_for_call )
     {
     case DLL_PROCESS_ATTACH:
+        ::OutputDebugStringW(L"TPSpoolFlsHook: DLL_PROCESS_ATTACH");
         if ( DetourIsHelperProcess() )
         {
             return TRUE;
@@ -246,10 +263,13 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
         DetourTransactionCommit();
         break;
     case DLL_THREAD_ATTACH:
+        ::OutputDebugStringW(L"TPSpoolFlsHook: DLL_THREAD_ATTACH");
         break;
     case DLL_THREAD_DETACH:
+        ::OutputDebugStringW(L"TPSpoolFlsHook: DLL_THREAD_DETACH");
         break;
     case DLL_PROCESS_DETACH:
+        ::OutputDebugStringW(L"TPSpoolFlsHook: DLL_PROCESS_DETACH");
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
         DetourDetach(&(PVOID&)base_FlsAlloc, override_FlsAlloc);

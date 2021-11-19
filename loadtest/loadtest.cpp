@@ -300,28 +300,81 @@ const wchar_t* pps[] = {
     LR"(C:\Program Files\EFA\TPPrintDM.dll)",
     nullptr };
 
-    std::wstring getCmdOption(int argc, wchar_t* argv[], const std::wstring& option, const std::wstring& _default)
+std::wstring getCmdOption(int argc, wchar_t* argv[], const std::wstring& option, const std::wstring& _default)
+{
+    std::wstring cmd;
+    for (int i = 0; i < argc; ++i)
     {
-        std::wstring cmd;
-        for (int i = 0; i < argc; ++i)
+        std::wstring arg = argv[i];
+        if (0 == arg.find(option))
         {
-            std::wstring arg = argv[i];
-            if (0 == arg.find(option))
-            {
-                std::size_t found = arg.find_first_of(option);
-                cmd = arg.substr(found + option.size());
-                return cmd;
-            }
+            std::size_t found = arg.find_first_of(option);
+            cmd = arg.substr(found + option.size());
+            return cmd;
         }
-        return _default;
     }
+    return _default;
+}
 
+
+
+PVOID compareValue;
+VOID NTAPI callback (IN PVOID lpFlsData)
+{
+    if (compareValue != lpFlsData)
+        printf("callback error%p != %p\n", compareValue, lpFlsData);
+
+}
 int wmain(int argc, wchar_t* argv[])
 {
-    std::wstring mode = getCmdOption(argc, argv, L"--mode=", L"detours");
+    CheckDLL(L"TPSpoolFlsHook.dll");
+    std::wstring mode = getCmdOption(argc, argv, L"--mode=", L"test");
     std::wstring folder = getCmdOption(argc, argv, L"--dir=", L".");
     std::wstring filter = getCmdOption(argc, argv, L"--filter=", L".*\\.dll");
-    if (mode == L"loopdir")
+    if (mode == L"test")
+    {
+        std::list<DWORD> slots;
+        
+        srand((unsigned)time(0));
+        
+        while (true)
+        {
+            if (rand() & 3)
+            {
+                DWORD slot = FlsAlloc(callback);
+                if (slot != FLS_OUT_OF_INDEXES)
+                {
+                    if (rand() & 2)
+                        slots.push_back(slot);
+                    else
+                        slots.push_front(slot);
+
+                    FlsSetValue(slot, (PVOID)slot);
+                    //printf("FlsAlloc return %u\n", slot);
+                }
+                //else
+                //    printf("FlsAlloc return FLS_OUT_OF_INDEXES\n");
+            }
+            else
+            {
+                if (slots.size() == 0)
+                    continue;
+                auto slot = slots.front();
+                slots.pop_front();
+                if (FlsGetValue(slot) != (PVOID)slot)
+                    printf("Illegal Value(%u) failed with %p", slot, FlsGetValue(slot));
+
+                static int sometimes = 0;
+                if ((++sometimes % 100000) == 0)
+                    printf("FlsFree %u of %u\n", slot, slots.size());
+
+                compareValue = (PVOID) slot;
+                if (FlsFree(slot) == FALSE)
+                    printf("FlsFree(%u) failed", slot);
+            }
+        }
+    }
+    else if (mode == L"loopdir")
     {
         using directory_iterator = filesystem::directory_iterator;
         for (const auto& dirEntry : directory_iterator(folder))
