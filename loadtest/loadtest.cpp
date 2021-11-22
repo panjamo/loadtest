@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <string>
 #include <regex>
+#include <thread>
 
 #include "loadtest.h"
 
@@ -318,28 +319,43 @@ std::wstring getCmdOption(int argc, wchar_t* argv[], const std::wstring& option,
 
 
 
-PVOID compareValue;
-VOID NTAPI callback (IN PVOID lpFlsData)
+PVOID compareValue[4];
+VOID NTAPI callback1(IN PVOID lpFlsData)
 {
-    if (compareValue != lpFlsData)
+    if (compareValue[0] != lpFlsData)
         printf("callback error%p != %p\n", compareValue, lpFlsData);
 
 }
-int wmain(int argc, wchar_t* argv[])
+VOID NTAPI callback2(IN PVOID lpFlsData)
 {
-    CheckDLL(L"TPSpoolFlsHook.dll");
-    std::wstring mode = getCmdOption(argc, argv, L"--mode=", L"test");
-    std::wstring folder = getCmdOption(argc, argv, L"--dir=", L".");
-    std::wstring filter = getCmdOption(argc, argv, L"--filter=", L".*\\.dll");
-    if (mode == L"test")
-    {
+    if (compareValue[1] != lpFlsData)
+        printf("callback error%p != %p\n", compareValue, lpFlsData);
+
+}
+VOID NTAPI callback3(IN PVOID lpFlsData)
+{
+    if (compareValue[2] != lpFlsData)
+        printf("callback error%p != %p\n", compareValue, lpFlsData);
+
+}
+VOID NTAPI callback4(IN PVOID lpFlsData)
+{
+    if (compareValue[3] != lpFlsData)
+        printf("callback error%p != %p\n", compareValue, lpFlsData);
+
+}
+
+
+
+void testthread(int nr, int *maxAllocs, PFLS_CALLBACK_FUNCTION callback)
+{
         std::list<DWORD> slots;
-        
+        int sometimes = 0;
         srand((unsigned)time(0));
-        
+
         while (true)
         {
-            if (rand() & 3)
+            if (rand() & 3 && slots.size() < *maxAllocs)
             {
                 DWORD slot = FlsAlloc(callback);
                 if (slot != FLS_OUT_OF_INDEXES)
@@ -364,15 +380,46 @@ int wmain(int argc, wchar_t* argv[])
                 if (FlsGetValue(slot) != (PVOID)slot)
                     printf("Illegal Value(%u) failed with %p", slot, FlsGetValue(slot));
 
-                static int sometimes = 0;
                 if ((++sometimes % 100000) == 0)
-                    printf("FlsFree %u of %u\n", slot, slots.size());
+                    printf("%d: FlsFree %u of %u\n", nr, slot, slots.size());
 
-                compareValue = (PVOID) slot;
+                compareValue[nr-1] = (PVOID) slot;
                 if (FlsFree(slot) == FALSE)
                     printf("FlsFree(%u) failed", slot);
             }
         }
+}
+
+
+
+int wmain(int argc, wchar_t* argv[])
+{
+    std::wstring maxfls = getCmdOption(argc, argv, L"--maxfls=", L"1056");
+    std::wstring mode = getCmdOption(argc, argv, L"--mode=", L"test");
+    std::wstring folder = getCmdOption(argc, argv, L"--dir=", L".");
+    std::wstring filter = getCmdOption(argc, argv, L"--filter=", L".*\\.dll");
+    if (mode == L"test")
+    {
+
+        // Constructs the new thread and runs it. Does not block execution.
+
+        int sometimes = 50;
+        thread t1(testthread, 1, &sometimes, callback1);
+        thread t2(testthread, 2, &sometimes, callback2);
+
+        Sleep(3000);
+        CheckDLL(L"TPSpoolFlsHook.dll");
+        sometimes = _wtoi(maxfls.c_str());
+        Sleep(3000);
+
+
+        thread t3(testthread, 3, &sometimes, callback3);
+        thread t4(testthread, 4, &sometimes, callback4);
+
+        t1.join();
+        t2.join();
+        t3.join();
+        t4.join();
     }
     else if (mode == L"loopdir")
     {

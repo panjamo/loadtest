@@ -135,10 +135,12 @@ DWORD WINAPI override_FlsAlloc(_In_opt_ PFLS_CALLBACK_FUNCTION lpCallback)
     else
     {
         // slow path
+        uint32_t j = rand();
         for ( i = 0; i < g_fiber_slots.size(); ++i )
         {
-            if ( g_fiber_slots[i].callback == nullptr )
+            if ( g_fiber_slots[++j & 0xfff].callback == nullptr )
             {
+                i = j & 0xfff;
                 break;
             }
         }
@@ -276,7 +278,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
         {
             return TRUE;
         }
-
+        srand((unsigned)time(0));
         if (!::InitializeCriticalSectionAndSpinCount(&g_crit, 4000))
         {
             ::OutputDebugStringW(L"TPSpoolFlsHook: Could not initialize CriticalSection!\n");
